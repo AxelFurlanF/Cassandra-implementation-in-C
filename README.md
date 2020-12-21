@@ -9,7 +9,7 @@ We had to develop a distributed key-value database and implement an API that cou
 
 Like Cassandra, there is a memtable that held the "cache", this is the first point of entry of a new key-value record. You also have an N number of Memory workers that are called the "Memory Pool", they know the existance of each other by _gossiping_. This pool holds the values once the main process _dumps_ them. Then, one by one, the memories start sending the new values and keys to the LFS (the Lissandra File System). Once it's there, a compacting process runs in a thread and compacts the files so 
 
-### How it works
+## How it works
 ### In general (for commands associated with tables)
 The Kernel receives a bunch of requests either by CLI or a socket request. It "plans them" using a Round Robin scheduling algorithm, with a _Quantum_ number set in the config and then sends each one into the corresponding Memory process in the Memory Pool.
 
