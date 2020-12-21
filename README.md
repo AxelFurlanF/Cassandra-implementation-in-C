@@ -1,32 +1,38 @@
-# tp-2019-1c-RYZEN
-# Pasos a seguir antes de ponerse a laburar
+# Lissandra (C implementation of Cassandra)
+Yes, Lissandra the LoL champion. The whole architecture documentation is here https://docs.google.com/document/d/1uMReZYgwPkWuVMxfv_FfyouFpSYVl1kqewOZuyAHw-A/edit (in Spanish)
 
-1. `git fetch` para actualizar todo mi local y tener una copia por si se va todo a la mierda.
-2. `git checkout mi-branch` para dirigirme a mi branch.
-3. `git pull origin mi-branch` para colocar los cambios que estan en Github en mi branch.
-4. Resolver conflictos si los hay, es decir, git te dice:
-```
-CONFLICT (content): Merge conflict in LFS/src/API.c
-Automatic merge failed; fix conflicts and then commit the result.
-```
-Esto se hace yendo al código y viendo aquellas partes que tienen una separación con `===============`. La parte de arriba de ese separador es lo que vos tenes y la parte de abajo hasta el otro separador es lo que quiere cambiar lo que acabas de pullear. Al modificar eso, seguis.
+## Basic idea of the project
 
-5. `git add los-archivos-que-quiero-commitear`
-6. `git status` para ver si los archivos que quiero commitear están en **verde**.
-7. `git diff HEAD` para ver que lo que estoy añadiendo en verde y lo que estoy sacando en rojo es lo correcto.
-8. `git commit -m 'mensaje que quiero meter'`.
-9. `git push origin HEAD`.
+![](/architecture.png "Architecture")
 
-### **NUNCA USAR** `-f`, `--force`, `git push` pelado. Si tenés algún conflicto, lee lo que dice git y googlealo y tratá de entender qué hiciste o consultalo con el grupo.
+We had to develop a distributed key-value database and implement an API that could CRUD across memory and persisted files.
 
-# Pasos a seguir para hacer un rebase
+Like Cassandra, there is a memtable that held the "cache", this is the first point of entry of a new key-value record. You also have an N number of Memory workers that are called the "Memory Pool", they know the existance of each other by _gossiping_. This pool holds the values once the main process _dumps_ them. Then, one by one, the memories start sending the new values and keys to the LFS (the Lissandra File System). Once it's there, a compacting process runs in a thread and compacts the files so 
 
-Un `rebase` es básicamente aplicar los nuevos commits de la branch **de la que yo partí** para hacer mi branch. Es decir, si de `master` saco una branch `mi-feature` y `master` le siguen haciendo cambios, mi branch `mi-feature` se "quedó vieja" con respecto a `master` y tengo que actualizarla, i.e `rebase`earla, i.e adelantar el commit de donde parte mi branch.
+### How it works
+### In general (for commands associated with tables)
+The Kernel receives a bunch of requests either by CLI or a socket request. It "plans them" using a Round Robin scheduling algorithm, with a _Quantum_ number set in the config and then sends each one into the corresponding Memory process in the Memory Pool.
 
-1. `git fetch`
-2. `git checkout la-branch-que-se-actualizo`
-3. `git pull origin la-branch-que-se-actualizo`
-4. `git checkout mi-feature`
-5. `git rebase la-branch-que-se-actualizo`
+For each table created, you can set the consistency type, the types are:
+- **Strong Consistency:** Only one Memory of the pool is in charge of handling requests related to that table.
+- **Strong-hash Consistency:** It can use more than 1 Memory to process the table's request but depending on the key the operation will go to a particular Memory that handles all operations on that key. This is achieved by a hash function applied on the key.
+- **Eventual Consistency:** Pick a Memory at random or using a Round Robin algorithm to pick one. This will not ensure consistent reads. If you INSERT a key-value pair and immediately SELECT it, it probably won't return the latest value.
 
-Listo! Podes seguír trabajando y pusheando normalmente. Si git no le gusta cuando pusheas después, corroborá que tu branch este bien igual que Github haciendo `git log` y fijándose en Github los commits de tu branch a ver si coinciden. Si esta todo bien `git push origin HEAD --force-with-lease`. AHORA CORROBORÁ QUE LO QUE ESTÁ EN GITHUB EN TU BRANCH ES CORRECTO.
+### For SET requests
+Once a new set request is received, Lissandra:
+1. Sends the request to the corresponding memory.
+2. The Memory process sets the value in memory.
+3. After a while, the Memory process _journals_ it's tables and values to the LFS. LFS saves them in memory.
+4. After a while, the LFS _dumps_ it's memtable to dump temporary files.
+5. After a while, the LFS _compacts_ the new dumped temp files with the old files and discards all old values. To save space in disk.
+
+
+### For GET requests
+Once a new get request is received, Lissandra:
+1. Checks first in the memtable inside the Kernel process
+2. If it's not there, it consults the value in the correspondent Memory from the Memory Pool.
+3. If it's not there, the request is sent to the file system to check in the newly dumped files.
+4. If it's not there, then it checks for the compacted files.
+5. If it's not there, it doesn't exist.
+
+If it was found in one of these steps, we can ensure it's the latest value (unless we're using Eventual Consistency - refer above).
