@@ -36,3 +36,15 @@ Once a new get request is received, Lissandra:
 5. If it's not there, it doesn't exist.
 
 If it was found in one of these steps, we can ensure it's the latest value (unless we're using Eventual Consistency - refer above).
+
+### Other commands
+- CREATE
+- INSERT
+- SELECT
+- DROP
+- RUN
+- DESCRIBE
+- JOURNAL
+- ADD
+- METRICS
+- CLEAR
